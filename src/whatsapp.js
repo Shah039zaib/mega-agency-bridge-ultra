@@ -1,110 +1,58 @@
-// whatsapp.js
-import {
-    default as Baileys,
+import makeWASocket, {
     useMultiFileAuthState,
+    DisconnectReason,
     fetchLatestBaileysVersion
-} from "@adiwajshing/baileys";
+} from "baileys"
+import Pino from "pino"
 
-import EventEmitter from "events";
-import fs from "fs";
-import path from "path";
+export async function startWhatsApp() {
+    console.log("Starting WhatsApp…")
 
-const events = new EventEmitter();
+    const { state, saveCreds } = await useMultiFileAuthState('./auth')
 
-let sock = null;
-const sessionDir = "./auth";
+    const { version } = await fetchLatestBaileysVersion()
 
-// STATUS OBJECT
-let WA_STATUS = {
-    qr: null,
-    connected: false,
-    lastError: null
-};
+    const sock = makeWASocket({
+        version,
+        printQRInTerminal: true,
+        auth: state,
+        logger: Pino({ level: "silent" })
+    })
 
-// CLEAN QR ON START
-if (fs.existsSync(sessionDir + "/qr.png")) {
-    fs.unlinkSync(sessionDir + "/qr.png");
-}
+    sock.ev.on('creds.update', saveCreds)
 
-// MAIN INIT FUNCTION
-export async function initWhatsApp() {
-    try {
-        console.log("Initializing WhatsApp…");
+    sock.ev.on('connection.update', (update) => {
+        const { connection, lastDisconnect } = update
 
-        // === FIX: LATEST VERSION RESOLUTION ===
-        const { version } = await fetchLatestBaileysVersion();
+        if (connection === 'close') {
+            const reason = lastDisconnect?.error?.output?.statusCode
 
-        // === AUTH STATE (MULTI-FILE) ===
-        const { state, saveCreds } = await useMultiFileAuthState(sessionDir);
-
-        sock = Baileys.makeWASocket({
-            version,
-            auth: state,
-            printQRInTerminal: false,
-            syncFullHistory: false,
-        });
-
-        // SAVE CREDS
-        sock.ev.on("creds.update", saveCreds);
-
-        // CONNECTION HANDLER
-        sock.ev.on("connection.update", (update) => {
-            const { connection, qr, lastDisconnect } = update;
-
-            if (qr) {
-                WA_STATUS.qr = qr;
-                events.emit("qr", qr);
+            if (reason !== DisconnectReason.loggedOut) {
+                console.log("Reconnecting WhatsApp…")
+                return startWhatsApp()
+            } else {
+                console.log("Logged Out. Delete auth folder and scan again.")
             }
+        }
 
-            if (connection === "open") {
-                WA_STATUS.connected = true;
-                WA_STATUS.qr = null;
-                console.log("WhatsApp Connected ✔");
-                events.emit("ready");
-            }
+        if (connection === 'open') {
+            console.log("WhatsApp Connected Successfully!")
+        }
+    })
 
-            if (connection === "close") {
-                WA_STATUS.connected = false;
-                console.log("WhatsApp Disconnected ❌");
-                events.emit("disconnect");
+    sock.ev.on("messages.upsert", async ({ messages }) => {
+        const msg = messages[0]
+        if (!msg.message) return
 
-                const reason = lastDisconnect?.error?.output?.statusCode;
-                if (reason !== 401) {
-                    console.log("Reconnecting…");
-                    initWhatsApp(); // autorestart
-                }
-            }
-        });
+        const sender = msg.key.remoteJid
+        const text = msg.message.conversation || ""
 
-        // MESSAGE HANDLER
-        sock.ev.on("messages.upsert", (msg) => {
-            events.emit("message", msg);
-        });
+        console.log(`Message from ${sender}:`, text)
 
-        return sock;
+        if (text.toLowerCase() === "hi") {
+            await sock.sendMessage(sender, { text: "Hello! How can I help you?" })
+        }
+    })
 
-    } catch (err) {
-        console.error("initWhatsApp Error:", err);
-        WA_STATUS.lastError = err.message;
-        throw err;
-    }
+    return sock
 }
-
-// === SEND MESSAGE ===
-export async function sendMessage(jid, message) {
-    if (!sock) throw new Error("WhatsApp not initialized.");
-    return await sock.sendMessage(jid, { text: message });
-}
-
-// === GET STATUS (OPTION B) ===
-export function getStatus() {
-    return {
-        connected: WA_STATUS.connected,
-        qr: WA_STATUS.qr ? true : false,
-        lastError: WA_STATUS.lastError,
-        sessionExists: fs.existsSync(sessionDir),
-    };
-}
-
-// EXPORT EVENTS ALSO
-export { events };
