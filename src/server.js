@@ -4,7 +4,7 @@ import { Server } from "socket.io";
 import cors from "cors";
 import dotenv from "dotenv";
 
-import { initWhatsApp, getStatus, sendMessage, events } from "./whatsapp.js";
+import { startWhatsApp } from "./whatsapp.js";
 
 dotenv.config();
 
@@ -59,7 +59,7 @@ app.post("/send", async (req, res) => {
 // INIT
 async function start() {
     console.log("Starting WhatsApp…");
-    await initWhatsApp();
+    await startWhatsApp();
 }
 
 start();
