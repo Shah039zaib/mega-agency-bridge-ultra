@@ -5,6 +5,8 @@ import makeWASocket, {
 } from "@whiskeysockets/baileys";
 
 
+
+
 let sock = null;
 let status = {
   connected: false,
@@ -13,9 +15,13 @@ let status = {
 };
 
 
+
+
 export function getStatus() {
   return status;
 }
+
+
 
 
 export async function initWhatsApp(io) {
@@ -23,7 +29,11 @@ export async function initWhatsApp(io) {
     const { state, saveCreds } = await useMultiFileAuthState("./data/sessions");
 
 
+
+
     const { version } = await fetchLatestBaileysVersion();
+
+
 
 
     sock = makeWASocket({
@@ -33,12 +43,37 @@ export async function initWhatsApp(io) {
     });
 
 
+
+
     // Save creds
     sock.ev.on("creds.update", saveCreds);
+
+
 
 
     // Connection handler
     sock.ev.on("connection.update", (update) => {
       const { connection, qr, lastDisconnect } = update;
 
-      // ... rest of the file content
+      if (connection === "close") {
+        const shouldReconnect =
+          lastDisconnect.error?.output?.statusCode !==
+          DisconnectReason.loggedOut;
+        console.log(
+          "connection closed due to ",
+          lastDisconnect.error,
+          ", reconnecting ",
+          shouldReconnect
+        );
+        // reconnect if not logged out
+        if (shouldReconnect) {
+          initWhatsApp(io);
+        }
+      } else if (connection === "open") {
+        console.log("opened connection");
+      }
+    });
+  } catch (error) {
+    console.log(error);
+  }
+}
