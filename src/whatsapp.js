@@ -2,7 +2,7 @@ import makeWASocket, {
   useMultiFileAuthState,
   fetchLatestBaileysVersion,
   DisconnectReason
-} from "@adiwajshing/baileys";
+} from "@whiskeysockets/baileys";
 
 let sock = null;
 let status = {
