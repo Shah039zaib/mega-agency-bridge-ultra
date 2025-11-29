@@ -1,0 +1,21 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"/><title>Mega Agency Admin</title><meta name="viewport" content="width=device-width,initial-scale=1"/><link rel="stylesheet" href="/style.css"/><script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script></head>
+<body>
+<header><h1>Mega Agency Bridge — Admin</h1></header>
+<main class="container">
+<section class="card"><h2>WhatsApp QR</h2><div id="qr-wrap"><img id="qr" alt="QR"/></div><div id="status">Status: <span id="st">loading...</span></div><button id="clear">Clear QR</button></section>
+<section class="card"><h2>Send Message</h2><input id="number" placeholder="923xxxxxxxxx"/><textarea id="msg" placeholder="Message"></textarea><button id="send">Send</button><div id="send-res"></div></section>
+</main>
+<script>
+  const sock=io(); const qrImg=document.getElementById('qr'); const statusSpan=document.getElementById('st');
+  sock.on('connect',()=>statusSpan.textContent='socket connected');
+  sock.on('qr',src=>{qrImg.src=src; statusSpan.textContent='QR ready';});
+  sock.on('ready',()=>{statusSpan.textContent='WhatsApp connected'; qrImg.src='';});
+  document.getElementById('send').addEventListener('click', async ()=>{
+    const number=document.getElementById('number').value.trim(); const message=document.getElementById('msg').value.trim();
+    document.getElementById('send-res').textContent='sending...';
+    try{ const tokenResp = await fetch('/api/token',{method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({key: 'mega-key'})}); const tjson = await tokenResp.json(); const r = await fetch('/api/send',{method:'POST', headers:{'Content-Type':'application/json','Authorization':'Bearer '+tjson.token}, body: JSON.stringify({number, message})}); const j = await r.json(); document.getElementById('send-res').textContent = JSON.stringify(j); }catch(e){ document.getElementById('send-res').textContent = e.message; }
+  });
+</script>
+</body></html>
