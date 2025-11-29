@@ -1,104 +1,110 @@
+// whatsapp.js
 import {
-    makeWASocket,
-    DisconnectReason,
+    default as Baileys,
     useMultiFileAuthState,
     fetchLatestBaileysVersion
-} from "@whiskeysockets/baileys";
+} from "@adiwajshing/baileys";
 
-import pino from "pino";
 import EventEmitter from "events";
 import fs from "fs";
 import path from "path";
 
-// GLOBAL EVENTS (socket.io aur API dono use kar sakte)
-export const events = new EventEmitter();
+const events = new EventEmitter();
 
-// SESSION PATH (ESM safe)
-const sessionDir = path.resolve("data/sessions");
-
-// Ensure session directory exists
-if (!fs.existsSync(sessionDir)) {
-    fs.mkdirSync(sessionDir, { recursive: true });
-}
-
-// STORE SOCKET
 let sock = null;
+const sessionDir = "./auth";
+
+// STATUS OBJECT
+let WA_STATUS = {
+    qr: null,
+    connected: false,
+    lastError: null
+};
+
+// CLEAN QR ON START
+if (fs.existsSync(sessionDir + "/qr.png")) {
+    fs.unlinkSync(sessionDir + "/qr.png");
+}
 
 // MAIN INIT FUNCTION
 export async function initWhatsApp() {
     try {
-        events.emit("log", "Initializing WhatsApp…");
+        console.log("Initializing WhatsApp…");
 
-        // Auth state load/save (Baileys recommended)
-        const { state, saveCreds } = await useMultiFileAuthState(sessionDir);
-
-        // Latest WA protocol version
+        // === FIX: LATEST VERSION RESOLUTION ===
         const { version } = await fetchLatestBaileysVersion();
 
-        // Create socket
-        sock = makeWASocket({
+        // === AUTH STATE (MULTI-FILE) ===
+        const { state, saveCreds } = await useMultiFileAuthState(sessionDir);
+
+        sock = Baileys.makeWASocket({
             version,
             auth: state,
             printQRInTerminal: false,
-            logger: pino({ level: "silent" }), // super low CPU for Render
-            browser: ["MegaAgency Ultra", "Chrome", "4.0"]
+            syncFullHistory: false,
         });
 
-        // SAVE CREDS ON CHANGE
+        // SAVE CREDS
         sock.ev.on("creds.update", saveCreds);
 
-        // QR EVENT
+        // CONNECTION HANDLER
         sock.ev.on("connection.update", (update) => {
-            const { qr, connection, lastDisconnect } = update;
+            const { connection, qr, lastDisconnect } = update;
 
             if (qr) {
+                WA_STATUS.qr = qr;
                 events.emit("qr", qr);
             }
 
             if (connection === "open") {
-                events.emit("ready", true);
-                console.log("WhatsApp Connected!");
+                WA_STATUS.connected = true;
+                WA_STATUS.qr = null;
+                console.log("WhatsApp Connected ✔");
+                events.emit("ready");
             }
 
             if (connection === "close") {
-                const reason =
-                    lastDisconnect?.error?.output?.statusCode;
+                WA_STATUS.connected = false;
+                console.log("WhatsApp Disconnected ❌");
+                events.emit("disconnect");
 
-                console.log("Disconnected:", reason);
-
-                if (
-                    reason !== DisconnectReason.loggedOut &&
-                    reason !== 401
-                ) {
-                    // Auto reconnect
-                    setTimeout(() => initWhatsApp(), 2000);
-                } else {
-                    console.log("Logged out. Clearing session…");
-
-                    fs.rmSync(sessionDir, { recursive: true, force: true });
-                    fs.mkdirSync(sessionDir, { recursive: true });
-
-                    setTimeout(() => initWhatsApp(), 2000);
+                const reason = lastDisconnect?.error?.output?.statusCode;
+                if (reason !== 401) {
+                    console.log("Reconnecting…");
+                    initWhatsApp(); // autorestart
                 }
             }
         });
 
-        // MESSAGE EVENT
-        sock.ev.on("messages.upsert", async (msg) => {
+        // MESSAGE HANDLER
+        sock.ev.on("messages.upsert", (msg) => {
             events.emit("message", msg);
         });
 
         return sock;
+
     } catch (err) {
-        console.error("initWhatsApp error:", err);
-        events.emit("error", err);
+        console.error("initWhatsApp Error:", err);
+        WA_STATUS.lastError = err.message;
         throw err;
     }
 }
 
-// SEND MESSAGE
-export async function sendMessageJID(jid, text) {
-    if (!sock) throw new Error("WhatsApp not initialized");
-
-    return await sock.sendMessage(jid, { text });
+// === SEND MESSAGE ===
+export async function sendMessage(jid, message) {
+    if (!sock) throw new Error("WhatsApp not initialized.");
+    return await sock.sendMessage(jid, { text: message });
 }
+
+// === GET STATUS (OPTION B) ===
+export function getStatus() {
+    return {
+        connected: WA_STATUS.connected,
+        qr: WA_STATUS.qr ? true : false,
+        lastError: WA_STATUS.lastError,
+        sessionExists: fs.existsSync(sessionDir),
+    };
+}
+
+// EXPORT EVENTS ALSO
+export { events };
