@@ -1,58 +1,71 @@
 import express from "express";
 import http from "http";
+import { Server } from "socket.io";
 import cors from "cors";
-import path from "path";
-import { fileURLToPath } from "url";
-import { initWhatsApp, getStatus } from "./whatsapp.js";
+import dotenv from "dotenv";
+
+import { initWhatsApp, getStatus, sendMessage, events } from "./whatsapp.js";
+
+dotenv.config();
 
 const app = express();
-app.use(cors());
 app.use(express.json());
+app.use(cors());
 
+// HTTP + SOCKET SERVER
 const server = http.createServer(app);
-
-// WebSocket / Socket.IO
-import { Server } from "socket.io";
 const io = new Server(server, {
-  cors: {
-    origin: "*",
-  },
+    cors: { origin: "*" }
 });
 
-// Fix ES module paths
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-// Public admin panel
-app.use(express.static(path.join(__dirname, "public")));
-
-// Status endpoints
-app.get("/status/health", (req, res) => {
-  res.json({ ok: true, status: getStatus() });
+// SOCKET.IO EVENTS
+events.on("qr", (qr) => {
+    io.emit("qr", { qr });
 });
 
-app.get("/status/ready", (req, res) => {
-  res.json({ ready: getStatus().connected });
+events.on("ready", () => {
+    io.emit("ready");
 });
 
-// Initialize WhatsApp
+events.on("disconnect", () => {
+    io.emit("disconnect");
+});
+
+events.on("message", (msg) => {
+    io.emit("message", msg);
+});
+
+// === API ROUTES ===
+
+// STATUS CHECK
+app.get("/status", (req, res) => {
+    res.json(getStatus());
+});
+
+// SEND MESSAGE
+app.post("/send", async (req, res) => {
+    try {
+        const { number, message } = req.body;
+        const jid = number + "@s.whatsapp.net";
+
+        const result = await sendMessage(jid, message);
+
+        res.json({ ok: true, result });
+    } catch (err) {
+        res.json({ ok: false, error: err.message });
+    }
+});
+
+// INIT
 async function start() {
-  try {
     console.log("Starting WhatsApp…");
-
-    await initWhatsApp(io);
-
-    console.log("WhatsApp initialized.");
-  } catch (err) {
-    console.error("Startup error:", err);
-  }
+    await initWhatsApp();
 }
 
 start();
 
-// Render port
-const PORT = process.env.PORT || 3000;
-
+// START SERVER
+const PORT = process.env.PORT || 10000;
 server.listen(PORT, () => {
-  console.log("Server running on port", PORT);
+    console.log("Server running on port " + PORT);
 });
